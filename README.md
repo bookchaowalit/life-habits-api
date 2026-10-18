@@ -56,7 +56,7 @@ successful no-op. Prints one JSON line per run; exit 1 if the API fails or a day
 could not be logged (retried next run), 2 on missing configuration. Variables
 (Railway only): `HABITS_API_URL` (the `habits-api` public https URL),
 `HABITS_AUTOGRANT_TOKEN` (the `habit-autolog` automation token; rotate with the other
-cell tokens). Deploy: `railway up --ci --service habits-autogrant`; check:
+cell tokens). Deploys from GitHub `main` after CI (see below); check:
 `railway run --service habits-autogrant -- habits-autogrant --dry-run`.
 
 ## MCP server (`habits-mcp`)
@@ -81,8 +81,14 @@ call). Errors reach the client as a fixed message from the HTTP status only (for
 uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/pytest -q          # add ../platform-empire[dev] for the end-to-end test
 NEON_API_KEY=... .venv/bin/habits-db provision
-npm install && railway config apply && railway up --ci --service habits-api
+npm install && railway config apply   # service settings only; code deploys from GitHub (below)
 ```
+
+Deploys (CD, since 2026-10-18): `habits-api`, `habits-publisher` and `habits-autogrant` are
+connected to this repository's `main` with Railway's Wait for CI (`checkSuites`). A merge to
+`main` deploys only after the CI and security checks pass; a failing check leaves production on
+the previous deployment. Roll back by redeploying an earlier deployment in Railway.
+`railway up` is no longer used.
 
 Railway variables (never in the repository): `SENTRY_DSN` (error reporting; unset = off, see
 `src/solo_habits/_sentry.py`), `HABITS_DB_MODE=hosted`,
