@@ -34,6 +34,8 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ._sentry import capture
+
 BANGKOK = ZoneInfo("Asia/Bangkok")
 DAY_ABBR = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 NOTE = "auto-granted (weekly batch)"
@@ -226,10 +228,12 @@ def main(argv: list[str] | None = None) -> int:
     today = datetime.now(BANGKOK).date()
     try:
         counts = run(Http(url, token), today, args.days, dry_run=args.dry_run)
-    except RequestError:
+    except RequestError as exc:
+        capture(exc)
         print(json.dumps({"event": "habits.autogrant", "error": "request_failed"}))
         return 1
     except (ApiError, OSError, urllib.error.URLError) as exc:
+        capture(exc)
         print(
             json.dumps(
                 {
