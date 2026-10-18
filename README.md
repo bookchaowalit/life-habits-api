@@ -84,6 +84,7 @@ NEON_API_KEY=... .venv/bin/habits-db provision
 npm install && railway config apply && railway up --ci --service habits-api
 ```
 
-Railway variables (never in the repository): `HABITS_DB_MODE=hosted`,
+Railway variables (never in the repository): `SENTRY_DSN` (error reporting; unset = off, see
+`src/solo_habits/_sentry.py`), `HABITS_DB_MODE=hosted`,
 `HABITS_DB_URL_API` / `HABITS_DB_URL_PUBLISHER`, `HABITS_JWT_PUBLIC_KEY_PEM`,
 `HABITS_JWT_ISSUER`, `EMPIRE_PLATFORM_URL`, `HABITS_PUBLISHER_TOKEN`.
