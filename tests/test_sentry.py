@@ -9,7 +9,11 @@ from solo_habits import _sentry
 def test_no_dsn_is_a_noop(monkeypatch):
     monkeypatch.delenv("SENTRY_DSN", raising=False)
     calls = []
-    monkeypatch.setitem(sys.modules, "sentry_sdk", type("Fake", (), {"init": lambda **kw: calls.append(kw)}))
+    monkeypatch.setitem(
+        sys.modules,
+        "sentry_sdk",
+        type("Fake", (), {"init": lambda **kw: calls.append(kw)}),
+    )
     _sentry.init_sentry()
     assert calls == []
 

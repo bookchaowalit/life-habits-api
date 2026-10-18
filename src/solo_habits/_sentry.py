@@ -19,11 +19,17 @@ def init_sentry() -> None:
     sentry_sdk.init(
         dsn=dsn,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-        release=os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("SENTRY_RELEASE") or None,
+        release=os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("SENTRY_RELEASE")
+        or None,
         traces_sample_rate=0.0,  # errors only: the free plan's quota is for errors
         send_default_pii=False,
     )
     service = os.environ.get("RAILWAY_SERVICE_NAME", "").strip()
     if service:
         sentry_sdk.set_tag("service", service)
-    print(f"sentry: enabled for {service or 'unknown service'}", file=sys.stderr, flush=True)
+    print(
+        f"sentry: enabled for {service or 'unknown service'}",
+        file=sys.stderr,
+        flush=True,
+    )
