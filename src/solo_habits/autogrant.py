@@ -166,6 +166,8 @@ def run(http: Http, today: date, days: int, *, dry_run: bool) -> dict[str, Any]:
                     params={"if_absent": "true"},
                 )["outcome"]
             except ApiError as exc:  # one failed day never blocks the rest; it is retried next run (the 14-day window overlaps)
+                if not counts["errors"]:
+                    capture(exc)  # one Sentry event per run, not one per failed day
                 counts["errors"] += 1
                 print(
                     json.dumps(
