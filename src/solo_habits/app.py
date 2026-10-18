@@ -40,6 +40,7 @@ from fastapi import (
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field
 
+from solo_habits._sentry import capture
 from solo_habits.auth import Principal, TokenVerifier, Unauthenticated
 from solo_habits.platform import Action, Denied, Platform, PlatformUnavailable
 from solo_habits.publisher import publish_pending
@@ -543,7 +544,8 @@ def create_app(
                 execution,
                 {"status": "succeeded", "service": "habits", **plan.audit},
             )
-        except (PlatformUnavailable, Denied):
+        except (PlatformUnavailable, Denied) as exc:
+            capture(exc)  # the write succeeded; only the audit finish failed
             log.warning(
                 json.dumps(
                     {"event": "habits.finish_failed", "execution": str(execution)}
