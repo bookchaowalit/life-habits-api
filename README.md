@@ -78,8 +78,9 @@ call). Errors reach the client as a fixed message from the HTTP status only (for
 ## Develop and operate
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
-.venv/bin/pytest -q          # add ../platform-empire[dev] for the end-to-end test
+uv sync --frozen --all-extras  # versions from uv.lock (the image installs the same lock)
+.venv/bin/pytest -q            # add ../platform-empire[dev] for the end-to-end test
+uvx ruff@0.17.1 format --check . && uvx ruff@0.17.1 check . && .venv/bin/mypy
 NEON_API_KEY=... .venv/bin/habits-db provision
 npm install && railway config apply   # service settings only; code deploys from GitHub (below)
 ```

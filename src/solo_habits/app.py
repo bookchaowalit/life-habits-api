@@ -19,11 +19,11 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import psycopg
 from fastapi import (
@@ -33,6 +33,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Response,
 )
 from fastapi import (
     Request as HttpRequest,
@@ -380,7 +381,7 @@ def row_hash(row: dict[str, Any] | None) -> str | None:
 class Work:
     """One write's open local transaction; ``marker`` tags its outbox rows until the execution exists."""
 
-    conn: psycopg.Connection
+    conn: psycopg.Connection[Any]
     marker: uuid.UUID
     caller: Principal
 
@@ -394,7 +395,7 @@ class Plan:
 
 
 def create_app(
-    connect: Callable[[], psycopg.Connection],
+    connect: Callable[[], psycopg.Connection[Any]],
     verifier: TokenVerifier,
     platform: Platform,
     publisher_token: Callable[[], str | None] = lambda: None,
@@ -402,7 +403,10 @@ def create_app(
     app = FastAPI(title="Habits API", version="1.0.0", description=__doc__)
 
     @app.middleware("http")
-    async def correlate(request: HttpRequest, call_next):
+    async def correlate(
+        request: HttpRequest,
+        call_next: Callable[[HttpRequest], Awaitable[Response]],
+    ) -> Response:
         given = request.headers.get("x-correlation-id", "")
         token = correlation_id.set(
             given if CORRELATION.match(given) else uuid.uuid4().hex
@@ -429,7 +433,7 @@ def create_app(
     Caller = Annotated[Principal, Depends(principal)]
 
     @contextmanager
-    def bound(caller: Principal) -> Iterator[psycopg.Connection]:
+    def bound(caller: Principal) -> Iterator[psycopg.Connection[Any]]:
         try:
             conn = connect()
         except psycopg.OperationalError as exc:
@@ -565,7 +569,11 @@ def create_app(
         return plan.result
 
     def audit(
-        kind: Kind, verb: str, record_id: int, before: dict | None, after: dict | None
+        kind: Kind,
+        verb: str,
+        record_id: int,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
     ) -> dict[str, Any]:
         return {
             "action": f"habits.{kind.name}.{verb}",
@@ -576,7 +584,11 @@ def create_app(
         }
 
     def emit(
-        work: Work, kind: Kind, verb: str, before: dict | None, after: dict | None
+        work: Work,
+        kind: Kind,
+        verb: str,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
     ) -> dict[str, Any]:
         current = after or before or {}
         payload: dict[str, Any] = {
@@ -661,10 +673,14 @@ def create_app(
 
     def refresh_streak(work: Work, habit_id: int) -> None:
         """Recompute the habit's streak fields from its logs, in the writing transaction."""
-        habit = work.conn.execute(
-            "SELECT schedule_days, best_streak FROM habits.habits WHERE id = %s FOR UPDATE",
-            (habit_id,),
-        ).fetchone()
+        # The caller has loaded (and locked) this habit, so the row exists.
+        habit = cast(
+            "dict[str, Any]",
+            work.conn.execute(
+                "SELECT schedule_days, best_streak FROM habits.habits WHERE id = %s FOR UPDATE",
+                (habit_id,),
+            ).fetchone(),
+        )
         done = {
             row["log_date"]
             for row in work.conn.execute(
@@ -672,10 +688,14 @@ def create_app(
                 (habit_id, date.fromordinal(today_local().toordinal() - 400)),
             )
         }
-        last = work.conn.execute(
-            "SELECT max(log_date) AS d FROM habits.habit_logs WHERE habit_id = %s AND completed",
-            (habit_id,),
-        ).fetchone()["d"]
+        # An aggregate always returns one row (d is NULL without completed logs).
+        last = cast(
+            "dict[str, Any]",
+            work.conn.execute(
+                "SELECT max(log_date) AS d FROM habits.habit_logs WHERE habit_id = %s AND completed",
+                (habit_id,),
+            ).fetchone(),
+        )["d"]
         current = streak(done, habit["schedule_days"], today_local())
         work.conn.execute(
             "UPDATE habits.habits SET current_streak = %s, best_streak = greatest(best_streak, %s),"
@@ -685,7 +705,7 @@ def create_app(
         )
 
     def as_of_today(
-        conn: psycopg.Connection, rows: list[dict[str, Any]]
+        conn: psycopg.Connection[Any], rows: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Habits with current_streak as of the owner's today (a missed day breaks it before any new log)."""
         if not rows:
@@ -711,10 +731,10 @@ def create_app(
         return out
 
     def load(
-        conn: psycopg.Connection, kind: Kind, record_id: int, *, lock: bool = False
+        conn: psycopg.Connection[Any], kind: Kind, record_id: int, *, lock: bool = False
     ) -> dict[str, Any]:
         # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
-        row = conn.execute(
+        row: dict[str, Any] | None = conn.execute(
             f"SELECT {kind.select} FROM {kind.table} WHERE id = %s{' FOR UPDATE' if lock else ''}",
             (record_id,),
         ).fetchone()
@@ -735,10 +755,14 @@ def create_app(
                 " ON CONFLICT DO NOTHING",
                 (caller.workspace, caller.actor, kind.name, key),
             )
-            row = conn.execute(
-                "SELECT record_id FROM habits.create_keys WHERE actor = %s AND kind = %s AND key = %s",
-                (caller.actor, kind.name, key),
-            ).fetchone()
+            # Inserted above or already there: the key's row always exists here.
+            row = cast(
+                "dict[str, Any]",
+                conn.execute(
+                    "SELECT record_id FROM habits.create_keys WHERE actor = %s AND kind = %s AND key = %s",
+                    (caller.actor, kind.name, key),
+                ).fetchone(),
+            )
             conn.commit()
         return int(row["record_id"])
 
@@ -765,7 +789,8 @@ def create_app(
             offset: Annotated[int, Query(ge=0)] = 0,
         ) -> Items:
             allow(caller, kind.permission("read"), kind.name)
-            where, params = ["TRUE"], []
+            where: list[str] = ["TRUE"]
+            params: list[Any] = []
             for column, value in (
                 ("category", category),
                 ("frequency", frequency),
@@ -807,7 +832,7 @@ def create_app(
             response_model=model,
             name=f"{kind.name}_by_slug",
         )
-        def by_slug(slug: str, caller: Caller):
+        def by_slug(slug: str, caller: Caller) -> BaseModel:
             allow(caller, kind.permission("read"), kind.name, not_found=True)
             with bound(caller) as conn:
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
@@ -823,7 +848,7 @@ def create_app(
         @app.get(
             f"/v1/{plural}/{{record_id}}", response_model=model, name=f"get_{kind.name}"
         )
-        def get_record(record_id: int, caller: Caller):
+        def get_record(record_id: int, caller: Caller) -> BaseModel:
             allow(
                 caller,
                 kind.permission("read"),
@@ -842,12 +867,14 @@ def create_app(
             name=f"create_{kind.name}",
         )
         def create(
-            body: create_model,
+            body: create_model,  # type: ignore[valid-type]  # the kind's model class, read by FastAPI at runtime
             caller: Caller,
-            background: BackgroundTasks,  # type: ignore[valid-type]
+            background: BackgroundTasks,
             idempotency_key: Annotated[str | None, Header()] = None,
-        ):
-            data = values(kind, body, body.model_fields_set | {"name", "slug"})
+        ) -> BaseModel:
+            # mypy cannot follow the per-kind model class; FastAPI has already validated it.
+            fields: Any = body
+            data = values(kind, fields, fields.model_fields_set | {"name", "slug"})
             data = {k: v for k, v in data.items() if v is not None}
             reserved = (
                 reserve(caller, kind, idempotency_key) if idempotency_key else None
@@ -871,19 +898,23 @@ def create_app(
                     ["workspace_id", *data],
                     [caller.workspace, *data.values()],
                 )
-                if body.legacy_id is not None:
+                if fields.legacy_id is not None:
                     columns.append("legacy_id")
-                    params.append(body.legacy_id)
+                    params.append(fields.legacy_id)
                 overriding = ""
                 if reserved is not None:
                     columns.append("id")
                     params.append(reserved)
                     overriding = " OVERRIDING SYSTEM VALUE"
-                row = work.conn.execute(
-                    f"INSERT INTO {kind.table} ({', '.join(columns)}){overriding}"
-                    f" VALUES ({', '.join(['%s'] * len(columns))}) RETURNING {kind.select}",
-                    params,
-                ).fetchone()
+                # INSERT ... RETURNING always yields the new row.
+                row = cast(
+                    "dict[str, Any]",
+                    work.conn.execute(
+                        f"INSERT INTO {kind.table} ({', '.join(columns)}){overriding}"
+                        f" VALUES ({', '.join(['%s'] * len(columns))}) RETURNING {kind.select}",
+                        params,
+                    ).fetchone(),
+                )
                 return Plan(
                     kind.permission("write"),
                     str(row["id"]),
@@ -908,17 +939,21 @@ def create_app(
         )
         def update(
             record_id: int,
-            body: update_model,
-            caller: Caller,  # type: ignore[valid-type]
+            body: update_model,  # type: ignore[valid-type]  # the kind's model class, read by FastAPI at runtime
+            caller: Caller,
             background: BackgroundTasks,
-        ):
-            requested = values(kind, body, body.model_fields_set - {"expected_version"})
+        ) -> BaseModel:
+            # mypy cannot follow the per-kind model class; FastAPI has already validated it.
+            fields: Any = body
+            requested = values(
+                kind, fields, fields.model_fields_set - {"expected_version"}
+            )
 
             def op(work: Work) -> Plan:
                 before = load(work.conn, kind, record_id, lock=True)
                 if (
-                    body.expected_version is not None
-                    and before["version"] != body.expected_version
+                    fields.expected_version is not None
+                    and before["version"] != fields.expected_version
                 ):
                     raise HTTPException(
                         status_code=409,
@@ -991,7 +1026,8 @@ def create_app(
             offset: Annotated[int, Query(ge=0)] = 0,
         ) -> Items:
             allow(caller, kind.permission("read"), kind.name)
-            where, params = ["TRUE"], []
+            where: list[str] = ["TRUE"]
+            params: list[Any] = []
             if record_id is not None:
                 where.append(f"{kind.log_key} = %s")
                 params.append(record_id)
@@ -1024,8 +1060,8 @@ def create_app(
         def put_log(
             record_id: int,
             log_date: date,
-            body: log_model_in,
-            caller: Caller,  # type: ignore[valid-type]
+            body: log_model_in,  # type: ignore[valid-type]  # the kind's model class, read by FastAPI at runtime
+            caller: Caller,
             if_absent: Annotated[
                 bool,
                 Query(
@@ -1033,8 +1069,10 @@ def create_app(
                     " (any log for kinds without completed) untouched"
                 ),
             ] = False,
-        ):
-            data = values(kind, body, body.model_fields_set, logs=True)
+        ) -> LogResult:
+            # mypy cannot follow the per-kind model class; FastAPI has already validated it.
+            fields: Any = body
+            data = values(kind, fields, fields.model_fields_set, logs=True)
 
             def op(work: Work) -> Plan:
                 load(

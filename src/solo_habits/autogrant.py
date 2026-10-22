@@ -31,7 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import IO, Any
 from zoneinfo import ZoneInfo
 
 from ._sentry import capture
@@ -48,8 +48,14 @@ DEFAULT_DAYS = (
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(
-        self, req, fp, code, msg, headers, newurl
-    ):  # never forward a token
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:  # never forward a token
         return None
 
 
@@ -86,7 +92,11 @@ class Http:
         self.opener = urllib.request.build_opener(_NoRedirect)
 
     def call(
-        self, method: str, path: str, body: Any = None, params: dict | None = None
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         clean = {k: v for k, v in (params or {}).items() if v is not None}
         query = f"?{urllib.parse.urlencode(clean, doseq=True)}" if clean else ""
@@ -110,7 +120,7 @@ class Http:
             raise RequestError() from None  # never include the exception text: it can quote the header
 
 
-def pages(http: Http, path: str, params: dict) -> list[dict[str, Any]]:
+def pages(http: Http, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     while True:
         page = http.call(

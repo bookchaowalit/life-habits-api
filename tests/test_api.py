@@ -40,11 +40,9 @@ def test_habit_lifecycle_with_logs_outbox_and_audit(
     habit = create_habit(
         client, headers, category="health", schedule_days=["mon", "wed"]
     )
-    assert (
-        habit["status"] == "active"
-        and habit["schedule_days"] == ["mon", "wed"]
-        and habit["version"] == 1
-    )
+    assert habit["status"] == "active"
+    assert habit["schedule_days"] == ["mon", "wed"]
+    assert habit["version"] == 1
     path = f"/v1/habits/{habit['id']}"
     first = client.put(
         f"{path}/logs/2026-10-10",
@@ -69,11 +67,12 @@ def test_habit_lifecycle_with_logs_outbox_and_audit(
         headers=headers,
         params={"habit_id": habit["id"], "from": "2026-10-01"},
     ).json()
-    assert [(l["log_date"], l["count"]) for l in logs["items"]] == [("2026-10-10", 3)]
+    assert [(entry["log_date"], entry["count"]) for entry in logs["items"]] == [
+        ("2026-10-10", 3)
+    ]
     logged = client.get(path, headers=headers).json()
-    assert (
-        logged["last_completed_at"] == "2026-10-10" and logged["version"] > 1
-    )  # the service keeps the streak
+    assert logged["last_completed_at"] == "2026-10-10"
+    assert logged["version"] > 1
     renamed = client.patch(path, headers=headers, json={"name": "Run daily"}).json()
     assert renamed["version"] == logged["version"] + 1
     assert client.delete(f"{path}/logs/2026-10-10", headers=headers).status_code == 204
@@ -118,16 +117,15 @@ def test_routines_and_their_logs(client, token, owner):
             "steps": [{"order": 1, "title": "Water"}],
         },
     ).json()
-    assert (
-        routine["routine_type"] == "daily_morning"
-        and routine["steps"][0]["title"] == "Water"
-    )
+    assert routine["routine_type"] == "daily_morning"
+    assert routine["steps"][0]["title"] == "Water"
     log = client.put(
         f"/v1/routines/{routine['id']}/logs/2026-10-10",
         headers=headers,
         json={"completed_steps": [1], "mood_before": 3, "mood_after": 4},
     ).json()
-    assert log["outcome"] == "created" and log["log"]["completed_steps"] == [1]
+    assert log["outcome"] == "created"
+    assert log["log"]["completed_steps"] == [1]
     assert (
         client.put(
             f"/v1/routines/{routine['id']}/logs/2026-10-10",
@@ -235,7 +233,8 @@ def test_invalid_values_and_version_conflicts(client, token, owner):
     conflict = client.patch(
         path, headers=headers, json={"name": "y", "expected_version": 9}
     )
-    assert conflict.status_code == 409 and conflict.json()["detail"]["version"] == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["version"] == 1
 
 
 def test_idempotent_create_and_lost_answer_retry(client, token, owner, platform):
@@ -253,10 +252,8 @@ def test_idempotent_create_and_lost_answer_retry(client, token, owner, platform)
     platform.begin = real_begin
     first = client.post("/v1/habits", headers=headers, json=body)
     again = client.post("/v1/habits", headers=headers, json=body)
-    assert (
-        first.status_code == again.status_code == 201
-        and first.json()["id"] == again.json()["id"]
-    )
+    assert first.status_code == again.status_code == 201
+    assert first.json()["id"] == again.json()["id"]
     assert platform.executions[platform.keys[key]]["status"] == "succeeded"
 
 
@@ -354,7 +351,7 @@ def test_logs_filter_by_notes_prefix_and_order(client, token, owner):
         headers=headers,
         params={"habit_id": habit["id"], "notes_prefix": "Strava:", "order": "desc"},
     ).json()["items"]
-    assert [l["log_date"] for l in found] == ["2026-10-01"]
+    assert [entry["log_date"] for entry in found] == ["2026-10-01"]
 
 
 def test_streak_fields_cannot_be_written(client, token, owner):
@@ -444,7 +441,8 @@ def test_if_absent_never_overwrites_an_existing_completed_log(client, token, own
     kept = client.put(
         f"{path}/2026-10-10", headers=headers, json=grant, params=conditional
     ).json()
-    assert kept["outcome"] == "unchanged" and (
+    assert kept["outcome"] == "unchanged"
+    assert (
         kept["log"]["count"],
         kept["log"]["notes"],
     ) == (4, "manual")
@@ -460,7 +458,8 @@ def test_if_absent_never_overwrites_an_existing_completed_log(client, token, own
     )
     # The default PUT still upserts over a completed log.
     overwritten = client.put(f"{path}/2026-10-10", headers=headers, json=grant).json()
-    assert overwritten["outcome"] == "updated" and overwritten["log"]["count"] == 1
+    assert overwritten["outcome"] == "updated"
+    assert overwritten["log"]["count"] == 1
 
 
 def test_if_absent_on_routine_logs_keeps_any_existing_log(client, token, owner):
@@ -473,4 +472,5 @@ def test_if_absent_on_routine_logs_keeps_any_existing_log(client, token, owner):
     kept = client.put(
         path, headers=headers, json={"notes": "other"}, params={"if_absent": "true"}
     ).json()
-    assert kept["outcome"] == "unchanged" and kept["log"]["notes"] == "mine"
+    assert kept["outcome"] == "unchanged"
+    assert kept["log"]["notes"] == "mine"

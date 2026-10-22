@@ -36,7 +36,9 @@ class FakeHttp:
             raise ApiError(500, "PUT x")
         key = (int(path.split("/")[3]), stamp)
         self.puts.append((key, body))
-        existed = any((l["habit_id"], l["log_date"]) == key for l in self.logs)
+        existed = any(
+            (entry["habit_id"], entry["log_date"]) == key for entry in self.logs
+        )
         if not existed:
             self.logs.append({"habit_id": key[0], "log_date": stamp, "completed": True})
         return {"outcome": "unchanged" if existed else "created", "log": {}}
@@ -60,9 +62,8 @@ def test_zero_habits_is_a_clean_noop():
 def test_grants_every_scheduled_missing_day_with_note():
     http = FakeHttp([habit(1), habit(2, ["mon", "fri"])])
     counts = run(http, TODAY, 7, dry_run=False)
-    assert (
-        counts["granted"] == 9 and counts["skipped"] == 0
-    )  # 7 + (Mon 10-05, Fri 10-09)
+    assert counts["granted"] == 9
+    assert counts["skipped"] == 0
     assert (
         (2, "2026-10-05"),
         {"completed": True, "count": 1, "notes": autogrant.NOTE},
@@ -74,7 +75,8 @@ def test_existing_completed_days_are_skipped():
     logs = [{"habit_id": 1, "log_date": "2026-10-09", "completed": True}]
     http = FakeHttp([habit(1)], logs)
     counts = run(http, TODAY, 7, dry_run=False)
-    assert counts["granted"] == 6 and counts["skipped"] == 1
+    assert counts["granted"] == 6
+    assert counts["skipped"] == 1
 
 
 def test_rerun_same_week_never_double_logs():
@@ -82,9 +84,9 @@ def test_rerun_same_week_never_double_logs():
     run(http, TODAY, 7, dry_run=False)
     first = len(http.puts)
     second = run(http, TODAY, 7, dry_run=False)
-    assert (
-        len(http.puts) == first and second["granted"] == 0 and second["skipped"] == 14
-    )
+    assert len(http.puts) == first
+    assert second["granted"] == 0
+    assert second["skipped"] == 14
 
 
 def test_dry_run_writes_nothing():
@@ -96,7 +98,8 @@ def test_dry_run_writes_nothing():
 def test_failed_day_is_counted_and_others_continue():
     http = FakeHttp([habit(1)], fail_dates={"2026-10-08"})
     counts = run(http, TODAY, 7, dry_run=False)
-    assert counts["errors"] == 1 and counts["granted"] == 6
+    assert counts["errors"] == 1
+    assert counts["granted"] == 6
 
 
 def test_main_exit_codes_and_no_token_in_output(monkeypatch, capsys):
@@ -113,11 +116,9 @@ def test_main_exit_codes_and_no_token_in_output(monkeypatch, capsys):
     monkeypatch.setattr(autogrant, "Http", lambda base, token: FakeHttp([]))
     assert autogrant.main(["--dry-run"]) == 0
     line = json.loads(capsys.readouterr().out)
-    assert (
-        line["event"] == "habits.autogrant"
-        and line["habits"] == 0
-        and line["dry_run"] is True
-    )
+    assert line["event"] == "habits.autogrant"
+    assert line["habits"] == 0
+    assert line["dry_run"] is True
 
     down = FakeHttp([])
     down.call = lambda *a, **k: (_ for _ in ()).throw(ApiError(503, "GET /v1/habits"))
@@ -156,7 +157,9 @@ def test_default_window_is_fourteen_days_ending_yesterday(monkeypatch, capsys):
     monkeypatch.setattr(autogrant, "Http", lambda base, token: Recorder([habit(1)]))
     assert autogrant.main(["--dry-run"]) == 0
     line = json.loads(capsys.readouterr().out)
-    assert autogrant.DEFAULT_DAYS == 14 and line["days"] == 14 and line["granted"] == 14
+    assert autogrant.DEFAULT_DAYS == 14
+    assert line["days"] == 14
+    assert line["granted"] == 14
     assert (seen["from"], seen["to"]) == ("2026-09-27", "2026-10-10")
 
 
@@ -181,10 +184,8 @@ def test_bad_token_never_appears_in_output(monkeypatch, capsys, token):
     monkeypatch.setenv("HABITS_AUTOGRANT_TOKEN", token)
     assert autogrant.main([]) == 2
     out = capsys.readouterr()
-    assert (
-        "zz" not in out.out + out.err
-        and json.loads(out.out)["error"] == "invalid_config"
-    )
+    assert "zz" not in out.out + out.err
+    assert json.loads(out.out)["error"] == "invalid_config"
 
 
 def test_surrounding_whitespace_is_stripped(monkeypatch):
@@ -204,7 +205,8 @@ def test_request_build_failure_leaks_nothing(monkeypatch, capsys):
     http = autogrant.Http("https://habits.example", "tok\nsecret-part")
     with pytest.raises(autogrant.RequestError) as caught:
         http.call("GET", "/v1/habits")
-    assert "secret-part" not in str(caught.value) and caught.value.__cause__ is None
+    assert "secret-part" not in str(caught.value)
+    assert caught.value.__cause__ is None
     monkeypatch.setenv("HABITS_API_URL", "https://habits.example")
     monkeypatch.setenv("HABITS_AUTOGRANT_TOKEN", "tok")
     real = autogrant.Http
@@ -213,4 +215,5 @@ def test_request_build_failure_leaks_nothing(monkeypatch, capsys):
     )
     assert autogrant.main([]) == 1
     out = capsys.readouterr()
-    assert "secret-part" not in out.out + out.err and "request_failed" in out.out
+    assert "secret-part" not in out.out + out.err
+    assert "request_failed" in out.out

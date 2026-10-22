@@ -169,3 +169,25 @@ OWNER_ACTIONS = {
     "habits.routine:write",
     "habits.routine:delete",
 }
+
+
+@pytest.fixture
+def owner(platform: FakePlatform) -> tuple[uuid.UUID, uuid.UUID]:
+    """An actor with every habits permission, in a fresh workspace."""
+    actor, ws = uuid.uuid4(), uuid.uuid4()
+    platform.grants[actor] = set(OWNER_ACTIONS)
+    return actor, ws
+
+
+def new_slug() -> str:
+    return f"h-{uuid.uuid4().hex[:10]}"
+
+
+def create_record(
+    client: TestClient, headers: dict[str, str], plural: str = "habits", **extra: Any
+) -> dict[str, Any]:
+    body = {"name": "Run", "slug": new_slug(), **extra}
+    response = client.post(f"/v1/{plural}", json=body, headers=headers)
+    assert response.status_code == 201, response.text
+    result: dict[str, Any] = response.json()
+    return result
