@@ -23,7 +23,7 @@ export default defineRailway(() => {
   const publisher = service("habits-publisher", {
     source: github,
     startCommand: "habits-publish",
-    deploy: { cronSchedule: "*/15 * * * *", restartPolicyType: "NEVER" },
+    deploy: { cronSchedule: "5 * * * *", restartPolicyType: "NEVER" },
   });
 
   // 15 17 * * 6 UTC = Sunday 00:15 Asia/Bangkok, the schedule of the retired local
