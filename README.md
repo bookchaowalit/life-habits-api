@@ -8,7 +8,7 @@ HTTP with the caller's own token (same pattern as
 | | |
 |---|---|
 | API | Railway project `life-habits-api`, service `habits-api` (Serverless: sleeps when idle) |
-| Outbox sweep | service `habits-publisher`, cron `*/15 * * * *` |
+| Outbox sweep | service `habits-publisher`, cron `5 * * * *` |
 | Weekly auto-grant | service `habits-autogrant`, cron `15 17 * * 6` UTC (Sunday 00:15 Asia/Bangkok) |
 | Data | Neon project `life-habits-api`, database `habits` |
 | Registry | solo-empire `repository-catalog/registries/online-systems.yaml` (`habits`) |
