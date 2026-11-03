@@ -95,3 +95,11 @@ Railway variables (never in the repository): `SENTRY_DSN` (error reporting; unse
 `src/solo_habits/_sentry.py`), `HABITS_DB_MODE=hosted`,
 `HABITS_DB_URL_API` / `HABITS_DB_URL_PUBLISHER`, `HABITS_JWT_PUBLIC_KEY_PEM`,
 `HABITS_JWT_ISSUER`, `EMPIRE_PLATFORM_URL`, `HABITS_PUBLISHER_TOKEN`.
+
+Gateway-only access (platform-api-gateway SPEC-002, `src/solo_habits/gateway.py`):
+`GATEWAY_ASSERTION_MODE` is `off` (default), `report` or `enforce`, and `GATEWAY_ASSERTION_KEY`
+is this service's 64-hex key from the gateway (`scripts/assertion_key.py habits` there).
+`report` serves every request and logs `gateway_assertion result=valid|missing|invalid` per
+request; `enforce` answers 403 `gateway_required` to calls that did not come through
+`gateway.bookchaowalit.com`. `/health` and `/openapi.json` stay open. Roll back by setting the
+mode to `report`.

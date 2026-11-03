@@ -38,11 +38,13 @@ from fastapi import (
 from fastapi import (
     Request as HttpRequest,
 )
+from fastapi.responses import JSONResponse
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field
 
 from solo_habits._sentry import capture
 from solo_habits.auth import Principal, TokenVerifier, Unauthenticated
+from solo_habits.gateway import GatewayCheck, report
 from solo_habits.platform import Action, Denied, Platform, PlatformUnavailable
 from solo_habits.publisher import publish_pending
 
@@ -399,8 +401,33 @@ def create_app(
     verifier: TokenVerifier,
     platform: Platform,
     publisher_token: Callable[[], str | None] = lambda: None,
+    gateway: GatewayCheck | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Habits API", version="1.0.0", description=__doc__)
+
+    if gateway is not None:
+
+        @app.middleware("http")
+        async def through_gateway(
+            request: HttpRequest,
+            call_next: Callable[[HttpRequest], Awaitable[Response]],
+        ) -> Response:
+            # Registered before `correlate`, so it runs inside it and a 403 still gets a correlation id.
+            path = request.url.path
+            raw = request.scope.get("raw_path") or path.encode()
+            result = gateway.result(
+                request.method,
+                raw.decode("latin-1"),
+                request.scope.get("query_string", b"").decode("latin-1"),
+                request.headers.get("x-gateway-assertion"),
+                request.headers.get("authorization", ""),
+                request.headers.get("content-type", ""),
+                await request.body(),  # cached by Starlette, so the route still reads it
+            )
+            report(result, request.method, path)
+            if gateway.refuses(path, result):
+                return JSONResponse({"error": "gateway_required"}, status_code=403)
+            return await call_next(request)
 
     @app.middleware("http")
     async def correlate(
@@ -1201,6 +1228,7 @@ def main() -> None:
         ),
         HttpPlatform(platform_url),
         publisher_token=lambda: os.environ.get("HABITS_PUBLISHER_TOKEN") or None,
+        gateway=GatewayCheck.from_env(),
     )
     uvicorn.run(
         app,
