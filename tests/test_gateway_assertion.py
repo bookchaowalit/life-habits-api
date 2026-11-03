@@ -157,6 +157,7 @@ def test_report_serves_and_logs_without_secrets(app_with, token, owner, caplog):
     client = app_with("report")
     headers = token(*owner)
     with caplog.at_level(logging.INFO, logger="solo_habits.gateway"):
+        assert client.get("/health").status_code == 200  # open paths are not reported
         assert (
             client.get("/v1/habits?status=active", headers=headers).status_code == 200
         )

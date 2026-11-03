@@ -44,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from solo_habits._sentry import capture
 from solo_habits.auth import Principal, TokenVerifier, Unauthenticated
-from solo_habits.gateway import GatewayCheck, report
+from solo_habits.gateway import GatewayCheck, is_open, report
 from solo_habits.platform import Action, Denied, Platform, PlatformUnavailable
 from solo_habits.publisher import publish_pending
 
@@ -414,6 +414,8 @@ def create_app(
         ) -> Response:
             # Registered before `correlate`, so it runs inside it and a 403 still gets a correlation id.
             path = request.url.path
+            if is_open(path):  # probes and describe_cell: neither checked nor reported
+                return await call_next(request)
             raw = request.scope.get("raw_path") or path.encode()
             result = gateway.result(
                 request.method,
