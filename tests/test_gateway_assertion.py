@@ -190,3 +190,26 @@ def test_from_env(monkeypatch):
     monkeypatch.setenv("GATEWAY_ASSERTION_MODE", "strict")
     with pytest.raises(SystemExit):
         GatewayCheck.from_env()
+
+
+def test_refused_before_the_body_is_read(app_with, token, owner, monkeypatch):
+    from starlette.requests import Request
+
+    reads = []
+    original = Request.body
+
+    async def counting(self):
+        reads.append(1)
+        return await original(self)
+
+    monkeypatch.setattr(Request, "body", counting)
+    client = app_with("enforce")
+    headers = {**token(*owner), "Content-Type": "application/json"}
+    for header in (None, "v1.x", "v1.1.YQ." + "a" * 43):  # missing, malformed, stale
+        h = (
+            dict(headers)
+            if header is None
+            else {**headers, "X-Gateway-Assertion": header}
+        )
+        assert client.post("/v1/habits", headers=h, content=b"{}").status_code == 403
+    assert reads == []

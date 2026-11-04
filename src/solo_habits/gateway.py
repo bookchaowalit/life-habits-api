@@ -106,6 +106,16 @@ def check(
     )
 
 
+def precheck(header: str | None, now: float) -> str | None:
+    """'missing' or 'invalid' when the header alone settles it (no body read); None = needs the MAC."""
+    if not header:
+        return "missing"
+    found = _HEADER_RE.fullmatch(header.strip())
+    if not found or abs(now - int(found[1])) > MAX_SKEW_SECONDS:
+        return "invalid"
+    return None
+
+
 @dataclass(frozen=True)
 class GatewayCheck:
     mode: Mode

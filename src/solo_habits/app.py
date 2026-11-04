@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
@@ -44,7 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from solo_habits._sentry import capture
 from solo_habits.auth import Principal, TokenVerifier, Unauthenticated
-from solo_habits.gateway import GatewayCheck, is_open, report
+from solo_habits.gateway import GatewayCheck, is_open, precheck, report
 from solo_habits.platform import Action, Denied, Platform, PlatformUnavailable
 from solo_habits.publisher import publish_pending
 
@@ -416,12 +417,14 @@ def create_app(
             path = request.url.path
             if is_open(path):  # probes and describe_cell: neither checked nor reported
                 return await call_next(request)
-            raw = request.scope.get("raw_path") or path.encode()
-            result = gateway.result(
+            header = request.headers.get("x-gateway-assertion")
+            # A missing, malformed or stale header is settled without reading the body, so a direct
+            # caller cannot make the service buffer a large body only to be refused.
+            result = precheck(header, time.time()) or gateway.result(
                 request.method,
-                raw.decode("latin-1"),
+                (request.scope.get("raw_path") or path.encode()).decode("latin-1"),
                 request.scope.get("query_string", b"").decode("latin-1"),
-                request.headers.get("x-gateway-assertion"),
+                header,
                 request.headers.get("authorization", ""),
                 request.headers.get("content-type", ""),
                 await request.body(),  # cached by Starlette, so the route still reads it
