@@ -24,6 +24,9 @@ HEADER = "x-gateway-assertion"
 MAX_SKEW_SECONDS = 60
 # Platform probes and describe_cell stay reachable without the gateway.
 OPEN_PATHS = ("/health", "/readyz", "/openapi.json", "/.well-known/")
+# The gateway refuses bodies above 1 MiB (MAX_BODY_BYTES) and forwards a Content-Length, so a bigger or
+# length-less (chunked) body cannot carry a valid assertion: it is "invalid" without being read.
+MAX_BODY_BYTES = 1_048_576
 _HEADER_RE = re.compile(
     r"v1\.([0-9]{1,12})\.([A-Za-z0-9_-]{1,180})\.([A-Za-z0-9_-]{43})"
 )
@@ -114,6 +117,18 @@ def precheck(header: str | None, now: float) -> str | None:
     if not found or abs(now - int(found[1])) > MAX_SKEW_SECONDS:
         return "invalid"
     return None
+
+
+def body_too_big(content_length: str | None, transfer_encoding: str | None) -> bool:
+    """True when the body is not one the gateway could have sent (so it is never buffered)."""
+    if transfer_encoding:
+        return True
+    if content_length is None:
+        return False  # no body
+    try:
+        return not 0 <= int(content_length) <= MAX_BODY_BYTES
+    except ValueError:
+        return True
 
 
 @dataclass(frozen=True)

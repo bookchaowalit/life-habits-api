@@ -11,7 +11,14 @@ from fastapi.testclient import TestClient
 
 from solo_habits.app import create_app
 from solo_habits.auth import TokenVerifier
-from solo_habits.gateway import GatewayCheck, _expected, check, is_open
+from solo_habits.gateway import (
+    MAX_BODY_BYTES,
+    GatewayCheck,
+    _expected,
+    body_too_big,
+    check,
+    is_open,
+)
 
 # Test vector made by the gateway's reference (book_api_gateway.assertion.sign) from the public test
 # master bytes(range(32)); it pins this copy to the gateway byte for byte.
@@ -151,6 +158,43 @@ def test_enforce_binds_the_body_and_the_route_still_reads_it(app_with, token, ow
     created = client.post("/v1/habits", headers=good, content=body)
     assert created.status_code == 201, created.text
     assert created.json()["slug"] == "run"
+
+
+def test_a_body_the_gateway_could_not_send_is_never_read():
+    assert not body_too_big(None, None)
+    assert not body_too_big("0", None)
+    assert not body_too_big(str(MAX_BODY_BYTES), None)
+    assert body_too_big(str(MAX_BODY_BYTES + 1), None)
+    assert body_too_big("-1", None)
+    assert body_too_big("12x", None)
+    assert body_too_big(None, "chunked")
+
+
+def test_a_signed_header_with_a_big_body_is_refused_unread(
+    app_with, token, owner, monkeypatch
+):
+    from starlette.requests import Request
+
+    reads = []
+    original = Request.body
+
+    async def counting_body(self):
+        reads.append(1)
+        return await original(self)
+
+    monkeypatch.setattr(Request, "body", counting_body)
+    client = app_with("enforce")
+    headers = token(*owner)
+    body = b"x" * (MAX_BODY_BYTES + 1)
+    big = {
+        **headers,
+        "Content-Type": "application/json",
+        "X-Gateway-Assertion": signed(
+            "POST", "/v1/habits", headers["Authorization"], "application/json", body
+        ),
+    }
+    assert client.post("/v1/habits", headers=big, content=body).status_code == 403
+    assert reads == []
 
 
 def test_report_serves_and_logs_without_secrets(app_with, token, owner, caplog):
