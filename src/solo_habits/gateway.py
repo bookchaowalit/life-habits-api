@@ -22,8 +22,19 @@ from typing import Literal
 SYSTEM = "habits"  # this service's id in the gateway route table
 HEADER = "x-gateway-assertion"
 MAX_SKEW_SECONDS = 60
-# Platform probes and describe_cell stay reachable without the gateway.
-OPEN_PATHS = ("/health", "/readyz", "/openapi.json", "/.well-known/")
+# Platform probes and describe_cell stay reachable without the gateway (the platform-* services probe
+# /healthz and /readyz; some cells answer /ready).
+OPEN_PATHS = (
+    "/health",
+    "/healthz",
+    "/ready",
+    "/readyz",
+    "/openapi.json",
+    "/.well-known/",
+)
+# A body the header says to wait for must arrive within this, or the request is "invalid" (a client that
+# sends a well-formed header and then stalls cannot hold the connection).
+BODY_TIMEOUT_SECONDS = 30
 # The gateway refuses bodies above 1 MiB (MAX_BODY_BYTES) and forwards a Content-Length, so a bigger or
 # length-less (chunked) body cannot carry a valid assertion: it is "invalid" without being read.
 MAX_BODY_BYTES = 1_048_576
@@ -187,8 +198,11 @@ class GatewayCheck:
 
 
 def is_open(path: str) -> bool:
+    # One trailing slash is ignored, as the routers do (/health/ is /health).
+    path = path[:-1] if len(path) > 1 and path.endswith("/") else path
     return any(
-        path == p or (p.endswith("/") and path.startswith(p)) for p in OPEN_PATHS
+        path == p or (p.endswith("/") and (path + "/").startswith(p))
+        for p in OPEN_PATHS
     )
 
 

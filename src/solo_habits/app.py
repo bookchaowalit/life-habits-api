@@ -12,6 +12,7 @@ Permissions: ``habits.habit:read|write|delete`` and ``habits.routine:read|write|
 Logging a day (or removing a day's log) is a write on its habit or routine.
 """
 
+import asyncio
 import contextvars
 import hashlib
 import json
@@ -45,7 +46,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from solo_habits._sentry import capture
 from solo_habits.auth import Principal, TokenVerifier, Unauthenticated
-from solo_habits.gateway import GatewayCheck, body_too_big, is_open, precheck, report
+from solo_habits.gateway import (
+    BODY_TIMEOUT_SECONDS,
+    GatewayCheck,
+    body_too_big,
+    is_open,
+    precheck,
+    report,
+)
 from solo_habits.platform import Action, Denied, Platform, PlatformUnavailable
 from solo_habits.publisher import publish_pending
 
@@ -427,6 +435,12 @@ def create_app(
             ):
                 result = "invalid"
             if result is None:
+                try:
+                    body = await asyncio.wait_for(request.body(), BODY_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    # A stalled body: answered at once in either mode, and the connection is not held.
+                    report("invalid", request.method, path)
+                    return JSONResponse({"error": "request_timeout"}, status_code=408)
                 result = gateway.result(
                     request.method,
                     (request.scope.get("raw_path") or path.encode()).decode("latin-1"),
@@ -434,7 +448,7 @@ def create_app(
                     header,
                     request.headers.get("authorization", ""),
                     request.headers.get("content-type", ""),
-                    await request.body(),  # cached by Starlette, so the route still reads it
+                    body,  # cached by Starlette, so the route still reads it
                 )
             report(result, request.method, path)
             if gateway.refuses(path, result):

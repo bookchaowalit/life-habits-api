@@ -257,3 +257,56 @@ def test_refused_before_the_body_is_read(app_with, token, owner, monkeypatch):
         )
         assert client.post("/v1/habits", headers=h, content=b"{}").status_code == 403
     assert reads == []
+
+
+def test_probe_paths_and_a_trailing_slash_stay_open():
+    from solo_habits.gateway import is_open
+
+    for path in (
+        "/health",
+        "/healthz",
+        "/ready",
+        "/readyz",
+        "/health/",
+        "/.well-known/jwks.json",
+    ):
+        assert is_open(path), path
+    for path in ("/healthcheck", "/ready-now", "/v1/health"):
+        assert not is_open(path), path
+
+
+def test_a_stalled_body_is_answered_408_and_not_waited_on(app_with, monkeypatch):
+    import asyncio
+
+    from solo_habits import app as app_module
+
+    monkeypatch.setattr(app_module, "BODY_TIMEOUT_SECONDS", 0.2)
+    app = app_with("report").app
+    header = signed("POST", "/v1/habits", "")
+    sent: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        await asyncio.sleep(5)  # the client never sends its body
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/habits",
+        "raw_path": b"/v1/habits",
+        "query_string": b"",
+        "headers": [
+            (b"x-gateway-assertion", header.encode()),
+            (b"content-length", b"10"),
+        ],
+        "client": ("127.0.0.1", 1),
+        "server": ("test", 80),
+    }
+    asyncio.run(asyncio.wait_for(app(scope, receive, send), 3))
+    assert sent[0]["status"] == 408
