@@ -277,19 +277,21 @@ def test_probe_paths_and_a_trailing_slash_stay_open():
 
 def test_a_stalled_body_is_answered_408_and_not_waited_on(app_with, monkeypatch):
     import asyncio
+    from collections.abc import MutableMapping
+    from typing import Any
 
     from solo_habits import app as app_module
 
     monkeypatch.setattr(app_module, "BODY_TIMEOUT_SECONDS", 0.2)
     app = app_with("report").app
     header = signed("POST", "/v1/habits", "")
-    sent: list[dict[str, object]] = []
+    sent: list[MutableMapping[str, Any]] = []
 
-    async def receive() -> dict[str, object]:
+    async def receive() -> MutableMapping[str, Any]:
         await asyncio.sleep(5)  # the client never sends its body
         return {"type": "http.disconnect"}
 
-    async def send(message: dict[str, object]) -> None:
+    async def send(message: MutableMapping[str, Any]) -> None:
         sent.append(message)
 
     scope = {
